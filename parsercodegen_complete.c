@@ -1,34 +1,34 @@
 /*
 Assignment:
-HW3 - Parser and Code Generator for PL/0
-Author(s): Jacob Smith, Jakson Zapata
+HW4 - Complete Parser and Code Generator for PL/0
+(with Procedures, Call, and Else)
+Author(s): <Full Name 1>, <Full Name 2>
 Language: C (only)
-
 To Compile:
 Scanner:
 gcc -O2 -std=c11 -o lex lex.c
-
 Parser/Code Generator:
-gcc -O2 -std=c11 -o parsercodegen parsercodegen.c
-
+gcc -O2 -std=c11 -o parsercodegen_complete parsercodegen_complete.c
+Virtual Machine:
+gcc -O2 -std=c11 -o vm vm.c
 To Execute (on Eustis):
 ./lex <input_file.txt>
-./parsercodegen
-
+./parsercodegen_complete
+./vm elf.txt
 where:
 <input_file.txt> is the path to the PL/0 source program
-
 Notes:
 - lex.c accepts ONE command-line argument (input PL/0 source file)
-- parsercodegen.c accepts NO command-line arguments
-- Input filename is hard-coded in parsercodegen.c
-- Implements recursive-descent parser for PL/0 grammar
+- parsercodegen_complete.c accepts NO command-line arguments
+- Input filename is hard-coded in parsercodegen_complete.c
+- Implements recursive-descent parser for extended PL/0 grammar
+- Supports procedures, call statements, and if-then-else
 - Generates PM/0 assembly code (see Appendix A for ISA)
+- VM must support EVEN instruction (OPR 0 11)
 - All development and testing performed on Eustis
-
 Class: COP3402 - System Software - Fall 2025
 Instructor: Dr. Jie Lin
-Due Date: Friday, October 31, 2025 at 11:59 PM ET
+Due Date: Friday, November 21, 2025 at 11:59 PM ET
 */
 
 #include <stdio.h>
@@ -107,6 +107,7 @@ int current_token;
 char current_identifier[MAX_LEXEME_LEN];
 int current_number;
 FILE *token_file;
+int current_level = 0;
 
 // Function prototypes
 void error(const char *msg);
@@ -256,8 +257,7 @@ void program()
 
     emit(9, 0, 3); // SYS 0 3 (HALT)
 
-    // Patch initial JMP
-    code[0].m = 1; // ✅ index; print/write layer scales to 3
+    // If initial JMP wasn't set by block (should be set at main entry), leave it as-is.
 }
 
 // BLOCK ::= CONST-DECLARATION VAR-DECLARATION STATEMENT
@@ -268,6 +268,88 @@ void block()
     const_declaration();
     int num_vars = var_declaration();
 
+    // Procedure declarations (zero or more)
+    while (current_token == procsym)
+    {
+        // consume 'procedure'
+        get_next_token();
+
+        if (current_token != identsym)
+        {
+            error("procedure must be followed by identifier");
+        }
+
+        // Save procedure name and add to symbol table with address = current code index
+        char proc_name[12];
+        strcpy(proc_name, current_identifier);
+
+        if (symbol_table_check(proc_name) != -1)
+        {
+            error("symbol name has already been declared");
+        }
+
+        symbol_table[symbol_table_index].kind = 3; // procedure
+        strcpy(symbol_table[symbol_table_index].name, proc_name);
+        symbol_table[symbol_table_index].val = 0;
+        symbol_table[symbol_table_index].level = current_level;
+        symbol_table[symbol_table_index].addr = code_index; // entry point for procedure
+        symbol_table[symbol_table_index].mark = 0;
+        symbol_table_index++;
+
+        // consume identifier
+        get_next_token();
+
+        if (current_token != semicolonsym)
+        {
+            error("procedure declaration must be followed by semicolon");
+        }
+
+        get_next_token(); // consume semicolon
+
+        // Reserve a JMP placeholder at the procedure entry so calls go to
+        // the procedure's entry JMP which will be patched to the real
+        // start of the procedure body after nested declarations are parsed.
+        emit(7, 0, 0); // JMP - will be patched to procedure body start
+
+        // Parse procedure block at next nesting level
+        current_level++;
+        block();
+        current_level--;
+
+        if (current_token != semicolonsym)
+        {
+            error("procedure block must be followed by semicolon");
+        }
+
+        get_next_token(); // consume semicolon
+
+        // Emit return for procedure (RTN)
+        emit(2, 0, 0); // OPR 0 0
+    }
+
+    // Set initial JMP (from start) to point to main block start only for outermost block
+    if (saved_table_index == 0 && code[0].m == 0)
+    {
+        code[0].m = code_index;
+    }
+
+    // If this block corresponds to a procedure (i.e., there is a procedure
+    // symbol immediately before the saved table index), patch that
+    // procedure's JMP placeholder to point to the start of its body.
+    if (saved_table_index > 0)
+    {
+        int proc_sym_idx = saved_table_index - 1;
+        if (proc_sym_idx >= 0 && proc_sym_idx < symbol_table_index && symbol_table[proc_sym_idx].kind == 3)
+        {
+            int jmp_idx = symbol_table[proc_sym_idx].addr;
+            if (jmp_idx >= 0 && jmp_idx < MAX_CODE_LENGTH && code[jmp_idx].op == 7 && code[jmp_idx].m == 0)
+            {
+                code[jmp_idx].m = code_index;
+            }
+        }
+    }
+
+    // Now allocate space for this block's variables
     emit(6, 0, 3 + num_vars); // INC
 
     statement();
@@ -320,7 +402,7 @@ void const_declaration()
             symbol_table[symbol_table_index].kind = 1;
             strcpy(symbol_table[symbol_table_index].name, saved_name);
             symbol_table[symbol_table_index].val = current_number;
-            symbol_table[symbol_table_index].level = 0;
+            symbol_table[symbol_table_index].level = current_level;
             symbol_table[symbol_table_index].addr = 0;
             symbol_table[symbol_table_index].mark = 0;
             symbol_table_index++;
@@ -364,7 +446,7 @@ int var_declaration()
             symbol_table[symbol_table_index].kind = 2;
             strcpy(symbol_table[symbol_table_index].name, current_identifier);
             symbol_table[symbol_table_index].val = 0;
-            symbol_table[symbol_table_index].level = 0;
+            symbol_table[symbol_table_index].level = current_level;
             symbol_table[symbol_table_index].addr = num_vars + 2;
             symbol_table[symbol_table_index].mark = 0;
             symbol_table_index++;
@@ -441,7 +523,7 @@ void statement()
         condition();
 
         int jpc_idx = code_index;
-        emit(8, 0, 0); // JPC - will be patched
+        emit(8, 0, 0); // JPC - will be patched to else-start
 
         if (current_token != thensym)
         {
@@ -451,14 +533,57 @@ void statement()
         get_next_token();
         statement();
 
-        if (current_token != fisym)
+        // 'else' is required by the HW4 grammar
+        if (current_token != elsesym)
         {
-            error("if must be followed by then");
+            error("if must be followed by else");
         }
 
         get_next_token();
 
+        // Jump over the else-part after then-part
+        int jmp_idx = code_index;
+        emit(7, 0, 0); // JMP - will be patched to after-else
+
+        // Patch JPC to start of else-part
         code[jpc_idx].m = code_index;
+
+        statement();
+
+        if (current_token != fisym)
+        {
+            error("if must be terminated by fi");
+        }
+
+        get_next_token();
+
+        // Patch JMP to after the else-part
+        code[jmp_idx].m = code_index;
+        return;
+    }
+
+    if (current_token == callsym)
+    {
+        get_next_token();
+
+        if (current_token != identsym)
+        {
+            error("call must be followed by identifier");
+        }
+
+        int sym_idx = symbol_table_check(current_identifier);
+        if (sym_idx == -1)
+        {
+            error("undeclared identifier");
+        }
+
+        if (symbol_table[sym_idx].kind != 3)
+        {
+            error("call must refer to a procedure");
+        }
+
+        emit(5, 0, symbol_table[sym_idx].addr); // CAL
+        get_next_token();
         return;
     }
 

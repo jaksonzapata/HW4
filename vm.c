@@ -1,37 +1,40 @@
 /*
 Assignment:
-vm.c - Implement a P-machine virtual machine
-
-Authors: Jakson Zapata, Jacob Smith
-
+HW4 - Complete Parser and Code Generator for PL/0
+(with Procedures, Call, and Else)
+Author(s): Jakson Zapata, Jacob Smith
 Language: C (only)
-
 To Compile:
-gcc -O2 -Wall -std=c11 -o vm vm.c
-
+Scanner:
+gcc -O2 -std=c11 -o lex lex.c
+Parser/Code Generator:
+gcc -O2 -std=c11 -o parsercodegen_complete parsercodegen_complete.c
+Virtual Machine:
+gcc -O2 -std=c11 -o vm vm.c
 To Execute (on Eustis):
-./vm input.txt
-
+./lex <input_file.txt>
+./parsercodegen_complete
+./vm elf.txt
 where:
-input.txt is the name of the file containing PM/0 instructions;
-each line has three integers (OP L M)
-
+<input_file.txt> is the path to the PL/0 source program
 Notes:
-- Implements the PM/0 virtual machine described in the homework
-  instructions.
-- No dynamic memory allocation or pointer arithmetic.
-- Does not implement any VM instruction using a separate function.
-- Runs on Eustis.
-
-Class: COP 3402 - Systems Software - Fall 2025
-Instructor : Dr. Jie Lin
-Due Date: Friday , September 12th , 2025
+- lex.c accepts ONE command-line argument (input PL/0 source file)
+- parsercodegen_complete.c accepts NO command-line arguments
+- Input filename is hard-coded in parsercodegen_complete.c
+- Implements recursive-descent parser for extended PL/0 grammar
+- Supports procedures, call statements, and if-then-else
+- Generates PM/0 assembly code (see Appendix A for ISA)
+- VM must support EVEN instruction (OPR 0 11)
+- All development and testing performed on Eustis
+Class: COP3402 - System Software - Fall 2025
+Instructor: Dr. Jie Lin
+Due Date: Friday, November 21, 2025 at 11:59 PM ET
 */
 
 #include <stdio.h>
 #include <stdlib.h>
 
-// Single process address
+// Single process address space
 static const int CODE_TOP = 499; // first OP is stored at pas[499]
 static int pas[500] = {0};
 
@@ -50,13 +53,10 @@ typedef struct
 
 static Instr IR;
 
-int base(int BP, int L);
-void print_trace(const char *name, int L, int M);
-
-// from HW1 PDF
-int base(int BP, int L)
+// base(bp, L) : follow static links L levels
+int base(int bp_val, int L)
 {
-  int arb = BP; // activation record base
+  int arb = bp_val;
   while (L > 0)
   {
     arb = pas[arb]; // follow static link
@@ -83,7 +83,7 @@ void print_trace(const char *instr_name, int L, int M)
     walk = next;
   }
 
-  // Decide how far to print
+  // Decide how far to print (upward toward callers)
   int stop = bp;
   int probe = bp;
   while (probe > 0 && probe < 500 && bar[probe])
@@ -119,14 +119,14 @@ void print_trace(const char *instr_name, int L, int M)
 
 int main(int argc, char *argv[])
 {
-  // 1) Argument check: exactly one input file
+  // 1) Check args
   if (argc != 2)
   {
-    fprintf(stderr, "Error: expected one input file (each line: OP L M).\n");
+    fprintf(stderr, "Usage: %s <input file>\n", argv[0]);
     return 1;
   }
 
-  // 2) Load code into PAS from the top (499,498,497 ... downward)
+  // 2) Load PM/0 instructions from file into PAS (code at top, descending)
   FILE *in = fopen(argv[1], "r");
   if (!in)
   {
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  int load_idx = 499; // OP goes here;
+  int load_idx = CODE_TOP; // OP goes here
   int op, l, m;
   int last_m_index_used = 500; // lowest (smallest) address touched by code
 
@@ -146,6 +146,7 @@ int main(int argc, char *argv[])
       fclose(in);
       return 1;
     }
+
     pas[load_idx] = op;
     pas[load_idx - 1] = l;
     pas[load_idx - 2] = m;
@@ -156,12 +157,11 @@ int main(int argc, char *argv[])
   fclose(in);
 
   // 3) Initialize registers per spec
-  pc = 499;               // before first fetch
+  pc = CODE_TOP;          // before first fetch
   sp = last_m_index_used; // top of stack starts right below code
   bp = sp - 1;            // base is one above the (empty) stack
 
-  // Print initial values and header
-  printf("L M PC BP SP stack\n");
+  // Print initial values
   printf("Initial values: %d %d %d\n", pc, bp, sp);
 
   // 4) Fetch–Execute loop
@@ -178,7 +178,7 @@ int main(int argc, char *argv[])
     switch (IR.op)
     {
     case 1:
-    { // LIT 0 n
+    { // LIT 0 M : push constant
       sp = sp - 1;
       pas[sp] = IR.m;
       print_trace("LIT", IR.l, IR.m);
@@ -186,10 +186,10 @@ int main(int argc, char *argv[])
     break;
 
     case 2:
-    { // OPR 0 m : arithmetic / logical / return
+    { // OPR 0 M : arithmetic / logical / return
       switch (IR.m)
       {
-      case 0:
+      case 0: // RTN
       {
         sp = bp + 1;
         bp = pas[sp - 2]; // DL
@@ -258,6 +258,12 @@ int main(int argc, char *argv[])
         print_trace("GEQ", IR.l, IR.m);
         break;
 
+      case 11: // EVEN (NEW FOR HW4)
+        // Replace top-of-stack with 1 if even, 0 if odd; sp does NOT change
+        pas[sp] = (pas[sp] % 2 == 0);
+        print_trace("EVEN", IR.l, IR.m);
+        break;
+
       default:
         fprintf(stderr, "Runtime error: invalid OPR subcode %d\n", IR.m);
         return 1;
@@ -274,7 +280,7 @@ int main(int argc, char *argv[])
     break;
 
     case 4:
-    { /* STO L o : store top into base(bp,L)-o; pop */
+    { /* STO L a : store top into base(bp,L)-a; pop */
       pas[base(bp, IR.l) - IR.m] = pas[sp];
       sp = sp + 1;
       print_trace("STO", IR.l, IR.m);
@@ -282,12 +288,13 @@ int main(int argc, char *argv[])
     break;
 
     case 5:
-    {                               /* CAL L a */
+    { /* CAL L a : call procedure at M (encoded) */
+      /* Set up new activation record */
       pas[sp - 1] = base(bp, IR.l); /* SL */
       pas[sp - 2] = bp;             /* DL */
       pas[sp - 3] = pc;             /* RA (after fetch) */
       bp = sp - 1;
-      pc = CODE_TOP - IR.m; // was: pc = IR.m;
+      pc = CODE_TOP - IR.m; // M is encoded as (CODE_TOP - target_index)
       print_trace("CAL", IR.l, IR.m);
     }
     break;
@@ -310,9 +317,9 @@ int main(int argc, char *argv[])
     { /* JPC 0 a */
       if (pas[sp] == 0)
       {
-        pc = CODE_TOP - IR.m; // was: pc = IR.m;
+        pc = CODE_TOP - IR.m; // same encoding as CAL/JMP
       }
-      sp = sp + 1;
+      sp = sp + 1; // pop condition
       print_trace("JPC", IR.l, IR.m);
     }
     break;
