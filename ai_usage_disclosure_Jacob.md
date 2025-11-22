@@ -2,7 +2,7 @@
 
 **Student Name:** Jacob Smith
 **Student ID:** 5590809
-**Assignment:** HW3
+**Assignment:** HW4
 
 ---
 
@@ -21,38 +21,34 @@ Claude
 Claude Sonnet 4.5
 
 ### Date(s) Used
-10/29/25
+11/21/25
 
 ### Specific Parts of Assignment
-Getting a base setup for the assignment including skeleton code for functions and global variables, debugging, and clarifications on functions
+Used AI to explain the instructions and give steps to getting started, assist in the debugging portion of assignment as well as deepen my understanding of the issues that came up in the debugging process
 
 ### Prompts Used
-given these instructions, and this code, give me psuedo code with explanations for the parser functions 
+Given the provided instructions can you explain what still needs to be done 
 
-After implementing the psuedo code this is what I have. How does my code look?
+Can you explain why I'm not getting the right output as well as steps to fix the issue
 
-Can you explain the symbol table check and get next token functions?
+This is my final code after implementing changes does everything look right?
 
 ### AI Output/Results
-AI provided me with psuedo code for the assignment and give me a good baseline and explanation for getting started
+The AI highlighted where I went wrong in my code as well as provided steps to take in order to resolve the issues
 
-Helped me understand issues with my code and provided fixes
-
-Helped deepen my understanding of the functions I was implementing and how everything worked
+Let me know that my code was looking good and no errors were detected
 
 ### How Output was Verified/Edited
-I implemented the psuedo code and checked with Claude afterwards to see where I made errors and also tested myself to see which functions needed work
+I implemented the code it provided and tested it by running the program with the new code to see if the output was correct 
 
-Utilized provided fixes and made sure functions worked accordingly during testing
 
-Couldn't verify the last prompt as it was more of an explanation than code but helped me better understand the project
 
 ### Multiple Iterations (if applicable)
-Prompted Claude to explain the psuedo code more in depth and give me some code to make sure I was getting the right ideas and properly executing psuedo code
+For the first prompt I followed up by asking it to give me psuedo code for what still needed to be done
 
 
 ### Learning & Reflection
-I learned more about prompting AI and getting the results/answers I require, I also learned more about debugging and testing code as well as the coding process as a whole
+I learned more about how I should approach starting to code a problem, and I also learned more about the steps I can take to fix issues in my code and how to debug more efficiently 
 
 ## AI Tool #2 (if applicable)
 
